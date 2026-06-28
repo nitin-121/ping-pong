@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ping Pong</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a2e;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            touch-action: none;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            user-select: none;
+        }
+        #header {
+            display: flex;
+            justify-content: space-between;
+            width: 90vw;
+            max-width: 600px;
+            margin-bottom: 8px;
+            font-size: 20px;
+        }
+        #header .p1 { color: #00f0ff; }
+        #header .p2 { color: #ff4081; }
+        #header .title { color: #fff; text-shadow: 0 0 10px #00f0ff; }
+        canvas {
+            border: 2px solid #333;
+            border-radius: 4px;
+            background: #0d0d3b;
+            touch-action: none;
+            width: 90vw;
+            height: 60vh;
+            max-width: 600px;
+            box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
+        }
+        #msg {
+            margin-top: 12px;
+            font-size: 14px;
+            color: #888;
+        }
+        #startBtn {
+            margin-top: 15px;
+            padding: 12px 40px;
+            font-size: 18px;
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #00f0ff, #0070ff);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: none;
+            box-shadow: 0 0 20px rgba(0, 112, 255, 0.5);
+        }
+        #startBtn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <span class="p1">YOU: <span id="s1">0</span></span>
+        <span class="title">🏓 PING PONG</span>
+        <span class="p2">CPU: <span id="s2">0</span></span>
+    </div>
+    <canvas id="c" width="600" height="400"></canvas>
+    <div id="msg"> Swipe or drag to move your paddle</div>
+    <button id="startBtn">TAP TO START</button>
+
+    <script>
+    (function() {
+        const canvas = document.getElementById("c");
+        const ctx = canvas.getContext("2d");
+        const s1El = document.getElementById("s1");
+        const s2El = document.getElementById("s2");
+        const msgEl = document.getElementById("msg");
+        const startBtn = document.getElementById("startBtn");
+
+        const W = canvas.width, H = canvas.height;
+        const PW = 12, PH = 90, BR = 9;
+        const WIN_SCORE = 7;
+        const MAX_SPEED = 12;
+
+        let p1Y = H/2 - PH/2, p2Y = H/2 - PH/2;
+        let bx = W/2, by = H/2, bdx = 0, bdy = 0;
+        let s1 = 0, s2 = 0;
+        let running = false, gameOver = false;
+        let particles = [];
+
+        // Audio context for beep sounds
+        let audioCtx = null;
+        function beep(freq, dur, vol) {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = 'square';
+                o.frequency.value = freq;
+                g.gain.value = vol || 0.08;
+                o.connect(g);
+                g.connect(audioCtx.destination);
+                o.start();
+                o.stop(audioCtx.currentTime + (dur || 0.05));
+            } catch(e) {}
+        }
+
+        function spawnParticles(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    life: 20,
+                    color
+                });
+            }
+        }
+
+        function resetBall(dir) {
+            bx = W/2; by = H/2;
+            const speed = 5;
+            const angle = (Math.random() * 0.8 - 0.4);
+            bdx = speed * dir * Math.cos(angle);
+            bdy = speed * Math.sin(angle);
+        }
+
+        function startGame() {
+            s1 = 0; s2 = 0;
+            s1El.textContent = '0'; s2El.textContent = '0';
+            p1Y = H/2 - PH/2; p2Y = H/2 - PH/2;
+            gameOver = false;
+            running = true;
+            startBtn.style.display = 'none';
+            msgEl.textContent = 'Swipe or drag to move your paddle';
+            resetBall(1);
+            audioCtx = null; // reset audio
+        }
+
+        function endGame(winner) {
+            running = false;
+            gameOver = true;
+            msgEl.textContent = winner === 1 ? '🎉 YOU WIN!' : '😞 CPU WINS!';
+            startBtn.textContent = 'PLAY AGAIN';
+            startBtn.style.display = 'block';
+            beep(winner === 1 ? 880 : 220, 0.3, 0.12);
+        }
+
+        function update() {
+            if (!running) return;
+
+            bx += bdx; by += bdy;
+
+            // Top/bottom walls
+            if (by - BR <= 0) { by = BR; bdy = Math.abs(bdy); beep(300, 0.03); }
+            if (by + BR >= H) { by = H - BR; bdy = -Math.abs(bdy); beep(300, 0.03); }
+
+            // Left paddle collision
+            if (bx - BR <= PW && by >= p1Y && by <= p1Y + PH && bdx < 0) {
+                bx = PW + BR;
+                const rel = (by - (p1Y + PH/2)) / (PH/2);
+                bdx = Math.min(Math.abs(bdx) * 1.06, MAX_SPEED);
+                bdy = rel * bdx * 0.9;
+                bdx = Math.abs(bdx);
+                beep(660, 0.04);
+                spawnParticles(bx, by, '#00f0ff');
+            }
+
+            // Right paddle collision
+            if (bx + BR >= W - PW && by >= p2Y && by <= p2Y + PH && bdx > 0) {
+                bx = W - PW - BR;
+                const rel = (by - (p2Y + PH/2)) / (PH/2);
+                bdx = -Math.min(Math.abs(bdx) * 1.06, MAX_SPEED);
+                bdy = rel * Math.abs(bdx) * 0.9;
+                beep(440, 0.04);
+                spawnParticles(bx, by, '#ff4081');
+            }
+
+            // Scoring
+            if (bx < -20) {
+                s2++; s2El.textContent = s2;
+                beep(200, 0.15);
+                if (s2 >= WIN_SCORE) { endGame(2); return; }
+                resetBall(1);
+            }
+            if (bx > W + 20) {
+                s1++; s1El.textContent = s1;
+                beep(500, 0.1);
+                if (s1 >= WIN_SCORE) { endGame(1); return; }
+                resetBall(-1);
+            }
+
+            // AI
+            const target = by - PH/2;
+            const diff = target - p2Y;
+            const aiSpeed = Math.min(Math.abs(diff), 3.5 + Math.abs(bdx) * 0.3);
+            p2Y += Math.sign(diff) * aiSpeed;
+            p2Y = Math.max(0, Math.min(H - PH, p2Y));
+
+            // Particles
+            particles = particles.filter(p => {
+                p.x += p.vx; p.y += p.vy; p.life--;
+                return p.life > 0;
+            });
+        }
+
+        function draw() {
+            ctx.fillStyle = '#0d0d3b';
+            ctx.fillRect(0, 0, W, H);
+
+            // Center line
+            ctx.setLineDash([8, 8]);
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(W/2, 0);
+            ctx.lineTo(W/2, H);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Paddles
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00f0ff';
+            ctx.fillStyle = '#00f0ff';
+            ctx.fillRect(0, p1Y, PW, PH);
+
+            ctx.shadowColor = '#ff4081';
+            ctx.fillStyle = '#ff4081';
+            ctx.fillRect(W - PW, p2Y, PW, PH);
+            ctx.shadowBlur = 0;
+
+            // Ball
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#fff';
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(bx, by, BR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Particles
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life / 20;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        // Input
+        function getY(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleY = H / rect.height;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return (clientY - rect.top) * scaleY;
+        }
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const y = getY(e);
+            p1Y = Math.max(0, Math.min(H - PH, y - PH/2));
+        }, { passive: false });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            const y = getY(e);
+            p1Y = Math.max(0, Math.min(H - PH, y - PH/2));
+        }, { passive: false });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleY = H / rect.height;
+            p1Y = Math.max(0, Math.min(H - PH, (e.clientY - rect.top) * scaleY - PH/2));
+        });
+
+        startBtn.addEventListener('click', startGame);
+        startBtn.addEventListener('touchend', (e) => { e.preventDefault(); startGame(); });
+
+        // Init
+        resetBall(0);
+        draw();
+        startBtn.style.display = 'block';
+        loop();
+    })();
+    </script>
+</body>
+</html>
